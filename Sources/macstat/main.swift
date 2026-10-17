@@ -8,6 +8,8 @@ Usage:
   macstat                  open the full-screen monitor
   macstat --once           print one snapshot and exit
   macstat --interval 0.5   refresh every half second
+  macstat --preview        print a 120×40 fixture frame
+  macstat --preview-help   print that frame with help open
   macstat --help
 
 Keys inside the monitor:
@@ -28,6 +30,8 @@ Temperatures are read from the SMC and shown in °F. They are thermal zones, not
 struct Options {
     var once = false
     var help = false
+    var preview = false
+    var previewHelp = false
     var interval = 1.0
 
     static func parse(_ arguments: [String]) -> Options {
@@ -38,6 +42,10 @@ struct Options {
             switch argument {
             case "--once", "-1":
                 options.once = true
+            case "--preview":
+                options.preview = true
+            case "--preview-help":
+                options.previewHelp = true
             case "--help", "-h":
                 options.help = true
             case "--interval", "-i":
@@ -62,6 +70,11 @@ struct Macstat {
         let options = Options.parse(CommandLine.arguments)
         if options.help {
             print(helpText)
+            return
+        }
+        if options.preview || options.previewHelp {
+            let frame = Fixture.frame(help: options.previewHelp)
+            FileHandle.standardOutput.write(Data(frame.utf8))
             return
         }
         let interactive = isatty(STDOUT_FILENO) == 1 && isatty(STDIN_FILENO) == 1
