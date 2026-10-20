@@ -186,21 +186,41 @@ struct Canvas {
         }
     }
 
-    func sparkline(values: [Double], x: Int, y: Int, width: Int, clip: Rect, floor: Double, ceiling: Double, color: (Double) -> RGB) {
-        guard width > 0 else { return }
+    /// A column graph. Each sample is one column, drawn upward with block characters.
+    func histogram(
+        values: [Double],
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        clip: Rect,
+        floor: Double,
+        ceiling: Double,
+        color: (Double) -> RGB
+    ) {
+        guard width > 0, height > 0 else { return }
         let blocks: [Character] = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
         let series = Array(values.suffix(width))
         let pad = width - series.count
         let span = max(ceiling - floor, 0.000_1)
+        let levels = height * 8
         for column in 0..<width {
             let sample = column < pad ? floor : series[column - pad]
             let fraction = min(max((sample - floor) / span, 0), 1)
-            var index = min(blocks.count - 1, Int((fraction * 8).rounded()))
-            if fraction > 0, index == 0 { index = 1 }
-            let pointX = x + column
-            guard clip.contains(column: pointX, row: y) else { continue }
-            let ink = index == 0 ? palette.dim : color(fraction)
-            screen.put(blocks[index], x: pointX, y: y, style: Style(ink))
+            var eighths = Int((fraction * Double(levels)).rounded())
+            if fraction > 0, eighths == 0 { eighths = 1 }
+            guard eighths > 0 else { continue }
+            let ink = color(fraction)
+            for line in 0..<height {
+                let fromBottom = height - 1 - line
+                let cell = eighths - fromBottom * 8
+                let index = cell >= 8 ? 8 : max(cell, 0)
+                guard index > 0 else { continue }
+                let pointX = x + column
+                let pointY = y + line
+                guard clip.contains(column: pointX, row: pointY) else { continue }
+                screen.put(blocks[index], x: pointX, y: pointY, style: Style(ink))
+            }
         }
     }
 }

@@ -89,10 +89,14 @@ enum Fixture {
                 percent: 0.81,
                 charging: false,
                 onAC: false,
-                minutesRemaining: 5 * 60 + 40,
+                fullyCharged: false,
+                minutesToEmpty: 5 * 60 + 40,
+                minutesToFull: nil,
                 watts: 11.4,
-                temperature: 31.2
+                temperature: 31.2,
+                cycleCount: 186
             ),
+            power: ComponentPower(cpu: 6.4, gpu: 2.1, dram: 1.4, ane: 0.2, display: 3.1),
             thermal: ThermalSample(
                 available: true,
                 state: "nominal",

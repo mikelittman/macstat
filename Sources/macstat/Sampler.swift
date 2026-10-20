@@ -118,9 +118,19 @@ struct BatterySample: Sendable {
     var percent: Double
     var charging: Bool
     var onAC: Bool
-    var minutesRemaining: Int?
+    var fullyCharged: Bool
+    var minutesToEmpty: Int?
+    var minutesToFull: Int?
     var watts: Double?
     var temperature: Double?
+    var cycleCount: Int?
+
+    var stateLabel: String {
+        if charging { return "charging" }
+        if fullyCharged { return "charged" }
+        if onAC { return "on AC" }
+        return "discharging"
+    }
 }
 
 struct FanSample: Sendable {
@@ -170,6 +180,7 @@ struct Snapshot: Sendable {
     var disk: DiskSample
     var gpu: GPUSample
     var battery: BatterySample?
+    var power: ComponentPower
     var thermal: ThermalSample
     var processes: [ProcessSample]
 }
@@ -187,6 +198,7 @@ private struct CoreTicks {
 final class Sampler {
     let system = SystemInfo.load()
     private let smc = SMC()
+    private let energy = EnergyModel()
     private let hid = HIDTemperatures()
     private var temperatureKeys: [SMCSensorKey] = []
     private var hidNames: [String] = []
@@ -213,6 +225,7 @@ final class Sampler {
         let disk = readDisk(elapsed: elapsed)
         let gpu = readGPU()
         let battery = readBattery()
+        let power = energy?.read(now: now) ?? ComponentPower()
         let thermal = readThermal()
         let processes = readProcesses(elapsed: elapsed, memoryTotal: system.memoryBytes)
         previousNanos = now
@@ -227,6 +240,7 @@ final class Sampler {
             disk: disk,
             gpu: gpu,
             battery: battery,
+            power: power,
             thermal: thermal,
             processes: processes
         )
@@ -447,7 +461,7 @@ final class Sampler {
     private func readBattery() -> BatterySample? {
         guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let list = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef] else {
-            return nil
+            return readSmartBattery()
         }
         for source in list {
             guard let description = IOPSGetPowerSourceDescription(blob, source)?.takeUnretainedValue() as? [String: Any] else {
@@ -458,9 +472,7 @@ final class Sampler {
             guard maximum > 0 else { continue }
             let state = description[kIOPSPowerSourceStateKey as String] as? String ?? ""
             let charging = boolValue(description[kIOPSIsChargingKey as String])
-            let minutes = state == kIOPSBatteryPowerValue as String
-                ? optionalMinutes(description[kIOPSTimeToEmptyKey as String])
-                : optionalMinutes(description[kIOPSTimeToFullChargeKey as String])
+            let onBattery = state == kIOPSBatteryPowerValue as String
             let amperage = number(description["Amperage"])
             let voltage = number(description["Voltage"])
             var watts: Double?
@@ -468,16 +480,71 @@ final class Sampler {
                 let computed = abs(amperage * voltage) / 1_000_000
                 if computed > 0, computed < 250 { watts = computed }
             }
-            return BatterySample(
+            var sample = BatterySample(
                 percent: min(max(current / maximum, 0), 1),
                 charging: charging,
                 onAC: state == kIOPSACPowerValue as String,
-                minutesRemaining: minutes,
+                fullyCharged: boolValue(description[kIOPSIsChargedKey as String]),
+                minutesToEmpty: onBattery ? powerMinutes(description[kIOPSTimeToEmptyKey as String]) : nil,
+                minutesToFull: charging ? powerMinutes(description[kIOPSTimeToFullChargeKey as String]) : nil,
                 watts: watts,
-                temperature: batteryTemperature(description["Temperature"])
+                temperature: batteryTemperature(description["Temperature"]),
+                cycleCount: nil
             )
+            if let smart = readSmartBattery() {
+                sample = mergeBattery(sample, smart: smart)
+            }
+            return sample
         }
-        return nil
+        return readSmartBattery()
+    }
+
+    /// AppleSmartBattery publishes cycle count and the charge and discharge estimates.
+    private func readSmartBattery() -> BatterySample? {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
+        guard service != 0 else { return nil }
+        defer { IOObjectRelease(service) }
+        var properties: Unmanaged<CFMutableDictionary>?
+        guard IORegistryEntryCreateCFProperties(service, &properties, kCFAllocatorDefault, 0) == kIOReturnSuccess,
+              let dictionary = properties?.takeRetainedValue() as? [String: Any] else {
+            return nil
+        }
+        let current = number(dictionary["CurrentCapacity"])
+        let maximum = number(dictionary["MaxCapacity"])
+        guard maximum > 0, maximum <= 100, current >= 0 else { return nil }
+        let charging = boolValue(dictionary["IsCharging"])
+        let onAC = boolValue(dictionary["ExternalConnected"])
+        let data = dictionary["BatteryData"] as? [String: Any]
+        let telemetry = dictionary["PowerTelemetryData"] as? [String: Any]
+        let watts = packWatts(telemetry?["BatteryPower"]) ?? packWatts(data?["BatteryPower"]) ?? packWatts(amperage: dictionary["Amperage"], voltage: dictionary["Voltage"])
+        let empty = powerMinutes(dictionary["AvgTimeToEmpty"])
+            ?? ((charging || onAC) ? nil : powerMinutes(dictionary["TimeRemaining"]))
+        return BatterySample(
+            percent: min(current / maximum, 1),
+            charging: charging,
+            onAC: onAC,
+            fullyCharged: boolValue(dictionary["FullyCharged"]),
+            minutesToEmpty: charging ? nil : empty,
+            minutesToFull: charging ? powerMinutes(dictionary["AvgTimeToFull"]) : nil,
+            watts: watts,
+            temperature: nil,
+            cycleCount: integer(dictionary["CycleCount"])
+        )
+    }
+
+    private func mergeBattery(_ sample: BatterySample, smart: BatterySample) -> BatterySample {
+        var merged = sample
+        merged.percent = smart.percent
+        merged.charging = smart.charging
+        merged.onAC = smart.onAC
+        merged.fullyCharged = smart.fullyCharged
+        merged.minutesToEmpty = smart.minutesToEmpty
+        merged.minutesToFull = smart.minutesToFull
+        if let watts = smart.watts, watts >= 0.05 || sample.watts == nil {
+            merged.watts = watts
+        }
+        if smart.cycleCount != nil { merged.cycleCount = smart.cycleCount }
+        return merged
     }
 
     private func readThermal() -> ThermalSample {
@@ -770,6 +837,46 @@ private func optionalMinutes(_ value: Any?) -> Int? {
     let minutes = Int(number(value))
     guard minutes >= 0 else { return nil }
     return minutes
+}
+
+private func powerMinutes(_ value: Any?) -> Int? {
+    let minutes = Int(number(value).rounded())
+    guard minutes > 0, minutes < 65535 else { return nil }
+    return minutes
+}
+
+private func integer(_ value: Any?) -> Int? {
+    guard let number = value as? NSNumber else { return nil }
+    let parsed = number.intValue
+    guard parsed >= 0, parsed < 20_000 else { return nil }
+    return parsed
+}
+
+/// Battery pack power. The registry sometimes stores a negative milliwatt
+/// reading as an unsigned 64-bit value.
+private func packWatts(_ value: Any?) -> Double? {
+    guard let number = value as? NSNumber else { return nil }
+    let bits = number.uint64Value
+    let signed: Int64
+    if number.doubleValue < 0 {
+        signed = number.int64Value
+    } else if bits > UInt64(Int64.max) {
+        signed = Int64(bitPattern: bits)
+    } else {
+        signed = number.int64Value
+    }
+    let watts = abs(Double(signed)) / 1000
+    guard watts.isFinite, watts < 250 else { return nil }
+    return watts
+}
+
+private func packWatts(amperage: Any?, voltage: Any?) -> Double? {
+    let amps = number(amperage)
+    let volts = number(voltage)
+    guard amps != 0, volts != 0 else { return nil }
+    let watts = abs(amps * volts) / 1_000_000
+    guard watts > 0, watts < 250 else { return nil }
+    return watts
 }
 
 private func batteryTemperature(_ value: Any?) -> Double? {

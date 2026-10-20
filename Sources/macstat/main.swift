@@ -291,9 +291,6 @@ func textReport(_ snapshot: Snapshot) -> String {
     if let average = thermal.gpuAverage {
         lines.append("  GPU avg \(formatTemperature(average))  peak \(formatTemperature(thermal.gpuPeak ?? average))")
     }
-    if let power = thermal.boardPower {
-        lines.append(String(format: "  board %.2f W", power))
-    }
     for fan in thermal.fans {
         let speed = fan.rpm < 1 ? "stopped" : String(format: "%.0f rpm", fan.rpm)
         lines.append("  \(fan.name)  \(speed)  (\(Int(fan.minimum))–\(Int(fan.maximum)))")
@@ -309,10 +306,35 @@ func textReport(_ snapshot: Snapshot) -> String {
     let read = snapshot.disk.readPerSecond.map(formatRate) ?? "n/a"
     let write = snapshot.disk.writePerSecond.map(formatRate) ?? "n/a"
     lines.append("Disk     read \(read)  write \(write)  free \(formatBytes(Double(snapshot.disk.volumeFree))) / \(formatBytes(Double(snapshot.disk.volumeTotal)))")
+    var powerLines: [String] = []
     if let battery = snapshot.battery {
-        let mode = battery.charging ? "charging" : (battery.onAC ? "AC" : "discharging")
-        let remaining = battery.minutesRemaining.map { "  \(formatDuration(minutes: $0))" } ?? ""
-        lines.append(String(format: "Battery  %.0f%%  %@%@", battery.percent * 100, mode, remaining))
+        var detail = String(format: "%.0f%%  %@", battery.percent * 100, battery.stateLabel)
+        if battery.charging, let minutes = battery.minutesToFull {
+            detail += "  \(formatDuration(minutes: minutes)) to full"
+        } else if let minutes = battery.minutesToEmpty {
+            detail += "  \(formatDuration(minutes: minutes)) left"
+        }
+        if let watts = battery.watts, watts >= 0.05 {
+            detail += "  \(formatWatts(watts))"
+        }
+        if let cycles = battery.cycleCount {
+            detail += "  \(cycles) cycles"
+        }
+        if let temperature = battery.temperature {
+            detail += "  \(formatTemperature(temperature))"
+        }
+        powerLines.append("  " + detail)
+    }
+    if let power = thermal.boardPower {
+        powerLines.append(String(format: "  system %.2f W", power))
+    }
+    let componentText = componentLine(snapshot.power, width: 120)
+    if !componentText.isEmpty {
+        powerLines.append("  " + componentText)
+    }
+    if !powerLines.isEmpty {
+        lines.append("Power")
+        lines.append(contentsOf: powerLines)
     }
 
     lines.append("")

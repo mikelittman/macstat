@@ -137,6 +137,11 @@ func formatRate(_ bytesPerSecond: Double) -> String {
     formatBytes(bytesPerSecond) + "/s"
 }
 
+func formatWatts(_ watts: Double) -> String {
+    if watts >= 100 { return String(format: "%.0fW", watts) }
+    return String(format: "%.1fW", watts)
+}
+
 func formatPercent(_ fraction: Double, decimals: Int = 1) -> String {
     let clamped = min(max(fraction, 0), 9.99)
     return String(format: "%.\(decimals)f%%", clamped * 100)

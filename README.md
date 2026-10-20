@@ -43,6 +43,8 @@ Temperatures come from the SMC and are shown in °F. They are thermal zones, not
 
 The CPU percentage is the average across every core. In the process list, 100% means one core is fully busy, so a process can go past 100%.
 
+Battery charge, time remaining, and cycle count come from the battery service and are shown in the Power box. While it is charging, the time shown is the estimate until full. CPU, GPU, DRAM, ANE, and display watts come from the energy counters. They stay hidden until a counter changes more than once, then show the average over that gap. At idle the counters can sit still for a long time, so that line stays blank. System watts, also in the Power box, are the SMC total and can differ from the battery reading.
+
 macOS hides task info for some system processes, including `kernel_task`. Those rows still appear, with a dash where CPU and memory would be.
 
 ## Screenshots
