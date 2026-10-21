@@ -56,3 +56,7 @@ swift build
 swiftc -framework AppKit -o /tmp/macstat-shot scripts/render-preview.swift
 /tmp/macstat-shot .build/debug/macstat docs/dashboard.png docs/help.png
 ```
+
+## License
+
+[MIT](LICENSE)
