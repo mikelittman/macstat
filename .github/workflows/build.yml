@@ -1,0 +1,16 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build a release binary
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "14.0"
+        run: swift build -c release

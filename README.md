@@ -6,17 +6,37 @@ A full-screen terminal monitor for Mac CPU, memory, temperatures, fans, network,
 
 The pictures use a built-in fixture, `macstat --preview`, so they are not a capture of a live machine.
 
-## Run
+## Install
 
 macOS 14 or later.
+
+### Homebrew
+
+A merge to `main` builds a universal binary, tags the next patch version, and publishes a GitHub release. The first release is `v0.1.0`. Later merges publish `v0.1.1`, `v0.1.2`, and so on.
+
+```bash
+brew tap mikelittman/macstat https://github.com/mikelittman/macstat
+brew install mikelittman/macstat/macstat
+```
+
+`brew update && brew upgrade macstat` installs a newer release.
+
+### From source
+
+```bash
+swift build -c release
+```
+
+`swift build -c release --show-bin-path` prints the directory that contains `macstat`.
+
+## Run
 
 ```bash
 swift run
 swift run macstat --once
-swift build -c release
 ```
 
-The release binary is `.build/release/macstat`. `--interval` / `-i` sets the refresh from 0.25 to 10 seconds. The default is 1 second. If stdout is not a terminal, macstat prints one snapshot and exits.
+`--interval` / `-i` sets the refresh from 0.25 to 10 seconds. The default is 1 second. If stdout is not a terminal, macstat prints one snapshot and exits.
 
 `MACSTAT_THEME=light` or `MACSTAT_THEME=dark` picks the palette.
 
